@@ -16,8 +16,18 @@ def mock_gemini_service():
 def test_create_thumbnails_success(mock_gemini_service):
     # Setup mock return value
     mock_variations = [
-        ThumbnailVariation(id="1", storage_path="/tmp/1.png", metadata={"index": 0}),
-        ThumbnailVariation(id="2", storage_path="/tmp/2.png", metadata={"index": 1})
+        ThumbnailVariation(
+            id="1", 
+            storage_path="/tmp/1.png", 
+            metadata={"index": 0},
+            exports=None
+        ),
+        ThumbnailVariation(
+            id="2", 
+            storage_path="/tmp/2.png", 
+            metadata={"index": 1},
+            exports=None
+        )
     ]
     mock_gemini_service.generate_thumbnails.return_value = mock_variations
     
