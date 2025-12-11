@@ -18,7 +18,7 @@ if not settings.SIGN_URLS:
     if output_dir.exists():
         app.mount("/static/output", StaticFiles(directory=str(output_dir)), name="output")
 
-app.include_router(endpoints.router, prefix="/api")
+app.include_router(endpoints.router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check():

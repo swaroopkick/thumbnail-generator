@@ -1,5 +1,14 @@
 import { create } from 'zustand'
 
+// Environment-based API configuration
+const getApiUrl = () => {
+  return import.meta.env.VITE_API_URL || 'http://localhost:8000'
+}
+
+const getApiVersion = () => {
+  return import.meta.env.VITE_API_VERSION || 'v1'
+}
+
 export const useStore = create((set, get) => ({
   // Form data state
   formData: {
@@ -49,38 +58,56 @@ export const useStore = create((set, get) => ({
     set({ loading: true, error: null })
     
     try {
-      // Simulate API call - replace with actual API integration
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      // Prepare form data for multipart submission
+      const apiFormData = new FormData()
+      apiFormData.append('script', formData.script)
+      apiFormData.append('aspect_ratio', formData.aspectRatio)
+      apiFormData.append('count', '3') // Generate 3 variations by default
       
-      // Mock generated thumbnails for now
-      const mockThumbnails = [
-        {
-          id: Date.now() + 1,
-          url: '/api/placeholder/400/225',
-          title: 'Generated Thumbnail 1',
-          prompt: 'Professional gaming setup with RGB lighting'
-        },
-        {
-          id: Date.now() + 2,
-          url: '/api/placeholder/400/225',
-          title: 'Generated Thumbnail 2',
-          prompt: 'Person reacting to game content'
-        },
-        {
-          id: Date.now() + 3,
-          url: '/api/placeholder/400/225',
-          title: 'Generated Thumbnail 3',
-          prompt: 'Minimalist tech thumbnail design'
-        }
-      ]
+      if (formData.uploadedImage) {
+        apiFormData.append('image', formData.uploadedImage)
+      }
+      
+      const apiUrl = getApiUrl()
+      const apiVersion = getApiVersion()
+      const fullApiUrl = `${apiUrl}/api/${apiVersion}/thumbnails`
+      
+      const response = await fetch(fullApiUrl, {
+        method: 'POST',
+        body: apiFormData,
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const errorMessage = errorData.detail || `HTTP ${response.status}: ${response.statusText}`
+        throw new Error(errorMessage)
+      }
+      
+      const responseData = await response.json()
+      
+      // Transform the response data to match our frontend structure
+      const newThumbnails = responseData.variations.map((variation, index) => ({
+        id: variation.id || `thumb_${Date.now()}_${index}`,
+        url: variation.exports?.png?.url || variation.exports?.jpeg?.url || variation.exports?.webp?.url || variation.storage_path,
+        title: `Generated Thumbnail ${index + 1}`,
+        prompt: formData.script.substring(0, 100) + (formData.script.length > 100 ? '...' : ''),
+        exports: variation.exports || {},
+        storagePath: variation.storage_path,
+        metadata: variation.metadata || {}
+      }))
       
       set((state) => ({
-        thumbnails: [...state.thumbnails, ...mockThumbnails],
-        loading: false
+        thumbnails: [...state.thumbnails, ...newThumbnails],
+        loading: false,
+        error: null
       }))
       
     } catch (error) {
-      set({ error: error.message, loading: false })
+      console.error('Thumbnail generation error:', error)
+      set({ 
+        error: error.message || 'Failed to generate thumbnails. Please try again.', 
+        loading: false 
+      })
     }
   },
 }))

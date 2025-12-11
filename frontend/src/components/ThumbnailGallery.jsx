@@ -1,8 +1,71 @@
 import { motion } from 'framer-motion'
 import { useStore } from '../store/useStore'
+import { useState } from 'react'
 
 export default function ThumbnailGallery() {
   const { thumbnails, loading, error } = useStore()
+  const [downloading, setDownloading] = useState({})
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const { generateThumbnails } = useStore()
+
+  // Retry function for failed generations
+  const handleRetry = () => {
+    generateThumbnails()
+  }
+
+  // Helper function to download a single file
+  const downloadFile = async (thumbnail, format = 'png') => {
+    const thumbnailId = thumbnail.id
+    setDownloading(prev => ({ ...prev, [thumbnailId]: format }))
+    
+    try {
+      // Get the appropriate export URL for the requested format
+      const exportData = thumbnail.exports?.[format.toUpperCase()]
+      const downloadUrl = exportData?.url || thumbnail.url
+      
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = `thumbnail_${thumbnailId}_${format}.${format}`
+      link.target = '_blank'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+    } catch (error) {
+      console.error('Download failed:', error)
+      alert(`Failed to download ${format.toUpperCase()} file. Please try again.`)
+    } finally {
+      setDownloading(prev => {
+        const newState = { ...prev }
+        delete newState[thumbnailId]
+        return newState
+      })
+    }
+  }
+
+  // Helper function for bulk download (zip or sequential)
+  const bulkDownload = async () => {
+    if (thumbnails.length === 0) return
+    
+    setBulkDownloading(true)
+    
+    try {
+      // For now, implement sequential download (can be enhanced to create ZIP)
+      for (let i = 0; i < thumbnails.length; i++) {
+        const thumbnail = thumbnails[i]
+        // Download PNG by default for bulk download
+        await downloadFile(thumbnail, 'png')
+        // Small delay between downloads to avoid overwhelming the browser
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    } catch (error) {
+      console.error('Bulk download failed:', error)
+      alert('Bulk download failed. Please try again.')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
 
   if (loading && thumbnails.length === 0) {
     return (
@@ -43,6 +106,17 @@ export default function ThumbnailGallery() {
           <h2 className="text-xl font-semibold">Error Generating Thumbnails</h2>
         </div>
         <p className="text-red-300 mt-2">{error}</p>
+        <motion.button
+          onClick={handleRetry}
+          className="btn-primary mt-4"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Try Again
+        </motion.button>
       </motion.div>
     )
   }
@@ -76,9 +150,37 @@ export default function ThumbnailGallery() {
         <h2 className="text-2xl font-bold text-white">
           Generated Thumbnails
         </h2>
-        <span className="text-sm text-gray-400">
-          {thumbnails.length} thumbnail{thumbnails.length !== 1 ? 's' : ''}
-        </span>
+        <div className="flex items-center space-x-4">
+          <span className="text-sm text-gray-400">
+            {thumbnails.length} thumbnail{thumbnails.length !== 1 ? 's' : ''}
+          </span>
+          {thumbnails.length > 0 && (
+            <motion.button
+              onClick={bulkDownload}
+              disabled={bulkDownloading}
+              className="btn-secondary text-sm"
+              whileHover={{ scale: bulkDownloading ? 1 : 1.02 }}
+              whileTap={{ scale: bulkDownloading ? 1 : 0.98 }}
+            >
+              {bulkDownloading ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Downloading...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Download All
+                </>
+              )}
+            </motion.button>
+          )}
+        </div>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -93,10 +195,12 @@ export default function ThumbnailGallery() {
           >
             {/* Thumbnail Image */}
             <div className="aspect-video bg-gradient-to-br from-purple-900/50 to-pink-900/50 relative overflow-hidden">
-              <img
+              <motion.img
                 src={thumbnail.url}
                 alt={thumbnail.title}
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                className="w-full h-full object-cover"
+                whileHover={{ scale: 1.05, rotateY: 5, rotateX: 5 }}
+                transition={{ duration: 0.3 }}
                 onError={(e) => {
                   e.target.style.display = 'none'
                   e.target.nextSibling.style.display = 'flex'
@@ -112,30 +216,90 @@ export default function ThumbnailGallery() {
                 </div>
               </div>
               
-              {/* Overlay Actions */}
-              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center space-x-3">
-                <motion.button
-                  className="btn-secondary px-4 py-2 text-sm"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  View
-                </motion.button>
-                <motion.button
-                  className="btn-primary px-4 py-2 text-sm"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Download
-                </motion.button>
-              </div>
+              {/* 3D Overlay Actions */}
+              <motion.div 
+                className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col justify-end p-4"
+                initial={{ opacity: 0, y: 20 }}
+                whileHover={{ opacity: 1, y: 0 }}
+              >
+                {/* Format Selection */}
+                <div className="space-y-2">
+                  <div className="flex space-x-2">
+                    <motion.button
+                      onClick={() => downloadFile(thumbnail, 'png')}
+                      disabled={downloading[thumbnail.id] === 'png'}
+                      className="flex-1 bg-blue-600/90 hover:bg-blue-700 text-white text-xs py-2 px-3 rounded-lg backdrop-blur-sm transition-colors"
+                      whileHover={{ scale: 1.02, z: 10 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      {downloading[thumbnail.id] === 'png' ? (
+                        <>
+                          <svg className="animate-spin w-3 h-3 mr-1 inline" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          PNG
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3 mr-1 inline" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                          </svg>
+                          PNG
+                        </>
+                      )}
+                    </motion.button>
+                    <motion.button
+                      onClick={() => downloadFile(thumbnail, 'jpeg')}
+                      disabled={downloading[thumbnail.id] === 'jpeg'}
+                      className="flex-1 bg-green-600/90 hover:bg-green-700 text-white text-xs py-2 px-3 rounded-lg backdrop-blur-sm transition-colors"
+                      whileHover={{ scale: 1.02, z: 10 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      {downloading[thumbnail.id] === 'jpeg' ? (
+                        <>
+                          <svg className="animate-spin w-3 h-3 mr-1 inline" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          JPG
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3 mr-1 inline" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                          </svg>
+                          JPG
+                        </>
+                      )}
+                    </motion.button>
+                    <motion.button
+                      onClick={() => downloadFile(thumbnail, 'webp')}
+                      disabled={downloading[thumbnail.id] === 'webp'}
+                      className="flex-1 bg-purple-600/90 hover:bg-purple-700 text-white text-xs py-2 px-3 rounded-lg backdrop-blur-sm transition-colors"
+                      whileHover={{ scale: 1.02, z: 10 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      {downloading[thumbnail.id] === 'webp' ? (
+                        <>
+                          <svg className="animate-spin w-3 h-3 mr-1 inline" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          WEBP
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3 mr-1 inline" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                          </svg>
+                          WEBP
+                        </>
+                      )}
+                    </motion.button>
+                  </div>
+                </div>
+              </motion.div>
             </div>
             
             {/* Thumbnail Info */}

@@ -24,7 +24,7 @@ settings = get_settings()
 @router.post("/thumbnails", response_model=ThumbnailResponse)
 async def create_thumbnails(
     script: str = Form(...),
-    image: UploadFile = File(...),
+    image: Optional[UploadFile] = File(None),
     aspect_ratio: str = Form(...),
     count: Optional[int] = Form(1)
 ):
@@ -66,8 +66,11 @@ async def create_thumbnails(
         )
     
     try:
-        # Stream file to temp storage
-        file_path = await save_upload_file(image)
+        # Handle optional image upload
+        file_path = None
+        if image:
+            # Stream file to temp storage
+            file_path = await save_upload_file(image)
         
         # Call service
         variations = gemini_service.generate_thumbnails(
@@ -77,8 +80,12 @@ async def create_thumbnails(
             count=count
         )
         
+        # Generate a unique request ID
+        import uuid
+        request_id = f"req_{uuid.uuid4().hex[:8]}"
+        
         return ThumbnailResponse(
-            request_id="req_" + file_path.split("/")[-1].split(".")[0], # simplified request ID
+            request_id=request_id,
             variations=variations
         )
         
