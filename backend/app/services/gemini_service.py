@@ -7,18 +7,22 @@ import google.generativeai as genai
 from google.api_core import exceptions
 from ..schemas.thumbnail import ThumbnailVariation, AspectRatio
 from ..utils.file_storage import save_generated_image
+from .image_export_service import ImageExportService
+from ..config import get_settings
 import uuid
 
 logger = logging.getLogger(__name__)
 
 class GeminiService:
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.settings = get_settings()
+        self.api_key = self.settings.GEMINI_API_KEY
         if self.api_key:
             genai.configure(api_key=self.api_key)
-        self.model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-3-pro")
-        self.max_retries = int(os.getenv("GEMINI_MAX_RETRIES", 3))
-        self.retry_delay = int(os.getenv("GEMINI_RETRY_DELAY", 2))
+        self.model_name = self.settings.GEMINI_MODEL_NAME
+        self.max_retries = self.settings.GEMINI_MAX_RETRIES
+        self.retry_delay = self.settings.GEMINI_RETRY_DELAY
+        self.export_service = ImageExportService()
 
     def _get_model(self):
         return genai.GenerativeModel(self.model_name)
@@ -33,9 +37,8 @@ class GeminiService:
         
         prompt = self._construct_prompt(script, aspect_ratio)
         
-        # Load the image
-        # In a real scenario, we would upload the file using the File API or pass bytes if supported
-        # genai.upload_file or similar might be needed for large files, but for simplicity assuming we pass data
+        # Limit count to max variations setting
+        count = min(count, self.settings.MAX_VARIATIONS)
         
         variations = []
         
@@ -43,7 +46,7 @@ class GeminiService:
         # checking if we are in a "mock" mode or just lack the key
         if not self.api_key:
             logger.warning("No Gemini API key found. Returning mock variations.")
-            return self._generate_mock_variations(count)
+            return self._generate_mock_variations(count, image_path)
 
         for i in range(count):
             # We might need to make separate calls if the API doesn't support 'n' parameter for images
@@ -60,19 +63,33 @@ class GeminiService:
                     
                     image_data = result # This would be extracted from the actual response
                     
-                    # Save image
+                    # Save raw image first
                     saved_path = save_generated_image(image_data, extension=".png")
                     
-                    variations.append(ThumbnailVariation(
+                    # Process and export in multiple formats
+                    metadata = {
+                        "prompt": prompt, 
+                        "model": self.model_name, 
+                        "index": i,
+                        "aspect_ratio": aspect_ratio.value
+                    }
+                    
+                    exports = self.export_service.process_and_export_image(
+                        image_data=image_data,
+                        base_image_path=image_path,
+                        metadata=metadata
+                    )
+                    
+                    variation = ThumbnailVariation(
                         id=str(uuid.uuid4()),
                         storage_path=saved_path,
-                        metadata={"prompt": prompt, "model": self.model_name, "index": i}
-                    ))
+                        metadata=metadata,
+                        exports=self._format_exports(exports)
+                    )
+                    variations.append(variation)
             except Exception as e:
                 logger.error(f"Failed to generate thumbnail variation {i}: {e}")
-                # We continue to try other variations even if one fails? 
-                # Or we raise? The requirements say "Handle API errors".
-                # If all fail, we should probably raise.
+                # Continue to try other variations even if one fails
         
         if not variations and self.api_key:
              raise Exception("Failed to generate any thumbnails")
@@ -144,15 +161,50 @@ class GeminiService:
         
         raise Exception("Max retries exceeded")
 
-    def _generate_mock_variations(self, count: int) -> typing.List[ThumbnailVariation]:
+    def _format_exports(self, exports: typing.Dict) -> typing.Dict:
+        """Convert export service output to schema format"""
+        from ..schemas.thumbnail import ImageExport
+        
+        formatted = {}
+        for format_key, export_data in exports.items():
+            formatted[format_key] = ImageExport(
+                format=export_data["format"],
+                url=export_data["url"],
+                file_path=export_data["file_path"],
+                size=export_data["size"],
+                exported_at=export_data["exported_at"]
+            )
+        return formatted
+
+    def _generate_mock_variations(self, count: int, base_image_path: str = None) -> typing.List[ThumbnailVariation]:
         variations = []
         for i in range(count):
             # Create a dummy image file
             dummy_data = b"mock_image_content"
             saved_path = save_generated_image(dummy_data, extension=".png")
-            variations.append(ThumbnailVariation(
-                id=str(uuid.uuid4()),
-                storage_path=saved_path,
-                metadata={"mock": True, "index": i}
-            ))
+            
+            metadata = {"mock": True, "index": i}
+            
+            # Process and export mock image
+            try:
+                exports = self.export_service.process_and_export_image(
+                    image_data=dummy_data,
+                    base_image_path=base_image_path,
+                    metadata=metadata
+                )
+                variation = ThumbnailVariation(
+                    id=str(uuid.uuid4()),
+                    storage_path=saved_path,
+                    metadata=metadata,
+                    exports=self._format_exports(exports)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to export mock image variation {i}: {e}")
+                variation = ThumbnailVariation(
+                    id=str(uuid.uuid4()),
+                    storage_path=saved_path,
+                    metadata=metadata
+                )
+            
+            variations.append(variation)
         return variations
